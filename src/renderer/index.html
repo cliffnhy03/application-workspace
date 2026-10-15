@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data:; script-src 'self'">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Application Workspace</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<div class="shell">
+  <aside class="side">
+    <div class="brand"><div class="mark" aria-hidden="true">AW</div><div><b>Application Workspace</b><span class="s">Your job search, in one place</span></div></div>
+    <button class="find" id="findBtn" type="button"></button>
+    <nav id="nav" aria-label="Main"></nav>
+    <button class="btn new" id="newBtn" type="button"></button>
+    <div class="side-foot" id="sideFoot"></div>
+  </aside>
+  <main class="view" id="view" tabindex="-1"></main>
+</div>
+
+<dialog id="palette" class="palette" aria-label="Quick find">
+  <label class="search" id="paletteSearch"><input id="paletteInput" placeholder="Jump to a company, file or action…" autocomplete="off" aria-controls="paletteResults"></label>
+  <ul class="results" id="paletteResults" role="listbox"></ul>
+  <div class="palette-foot"><span><kbd>↑</kbd> <kbd>↓</kbd> move</span><span><kbd>↵</kbd> open</span><span><kbd>esc</kbd> close</span></div>
+</dialog>
+
+<dialog id="newDialog" aria-labelledby="newTitle">
+  <form class="dlg" id="newForm" method="dialog">
+    <h2 id="newTitle">New application</h2>
+    <label class="field"><span>Company</span><input class="input" id="nCompany" required autocomplete="off" placeholder="e.g. Halden Reeve Consulting"></label>
+    <label class="field"><span>Role</span><input class="input" id="nRole" autocomplete="off" placeholder="e.g. Associate Consultant"></label>
+    <div class="row2">
+      <label class="field"><span>Application deadline (optional)</span><input class="input" id="nDue" type="date"></label>
+      <label class="field"><span>Job link (optional)</span><input class="input" id="nUrl" autocomplete="off" placeholder="https://"></label>
+    </div>
+    <div class="btns"><button class="btn ghost" type="button" id="newCancel">Cancel</button><button class="btn" type="submit">Add application</button></div>
+  </form>
+</dialog>
+
+<div class="toast" id="toast" role="status" hidden></div>
+<script src="app.js"></script>
+</body>
+</html>

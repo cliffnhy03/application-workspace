@@ -1,0 +1,35 @@
+# Builds the Mac and Windows installers and attaches them to a GitHub Release.
+# Trigger: push a tag like v1.0.1  (git tag v1.0.1 && git push origin v1.0.1)
+name: Release
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          - os: macos-latest
+            cmd: dist:mac
+            files: dist/*.dmg
+          - os: windows-latest
+            cmd: dist:win
+            files: dist/*.exe
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm ci
+      - run: npm test
+      - run: npm run ${{ matrix.cmd }} -- --publish never
+      - uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          files: ${{ matrix.files }}

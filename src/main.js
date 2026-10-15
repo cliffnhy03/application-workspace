@@ -1,7 +1,13 @@
 const { app, BrowserWindow, ipcMain, dialog, shell, Menu } = require('electron');
 const path = require('node:path');
 const fs = require('node:fs');
+const os = require('node:os');
 const { Store } = require('./store');
+
+// Release check, run by CI on fresh machines: AW_SMOKE_TEST=<result file> starts the app on
+// throwaway data, exercises it, writes "ok …" or "fail …" to that file and quits.
+const smokeFile = process.env.AW_SMOKE_TEST;
+if (smokeFile) app.setPath('userData', fs.mkdtempSync(path.join(os.tmpdir(), 'aw-smoke-')));
 
 let win, store;
 const isMac = process.platform === 'darwin';
@@ -37,6 +43,36 @@ function createWindow() {
   // Links open in the user's browser; the app window never navigates away.
   win.webContents.setWindowOpenHandler(({ url }) => { openExternal(url); return { action: 'deny' }; });
   win.webContents.on('will-navigate', e => e.preventDefault());
+  if (smokeFile) smokeTest();
+}
+
+function smokeTest() {
+  const errors = [];
+  const finish = (ok, detail) => {
+    fs.writeFileSync(smokeFile, `${ok ? 'ok' : 'fail'} ${app.getVersion()} ${process.platform}-${process.arch}: ${detail}\n`);
+    app.exit(ok ? 0 : 1);
+  };
+  const timer = setTimeout(() => finish(false, 'timed out after 60s'), 60000);
+  win.webContents.on('console-message', e => { if (e.level === 'error') errors.push(e.message); });
+  win.webContents.once('did-finish-load', async () => {
+    try {
+      const out = await win.webContents.executeJavaScript(`(async () => {
+        await new Promise(r => { const t = setInterval(() => { if (document.querySelector('#nav .nav')) { clearInterval(t); r(); } }, 50); });
+        const c = await api.createApp({ company: 'Smoke Test Ltd', role: 'Analyst' });
+        if (!c.ok) throw new Error(c.error);
+        const u = await api.updateApp(c.result, { stage: 3 });
+        if (!u.ok) throw new Error(u.error);
+        const s = u.state;
+        return 'stage ' + s.stages[s.applications[0].stage] + ', ' + document.querySelectorAll('#nav .nav').length + ' nav items';
+      })()`);
+      clearTimeout(timer);
+      if (errors.length) finish(false, 'console errors: ' + errors.join(' | '));
+      else finish(true, out);
+    } catch (err) {
+      clearTimeout(timer);
+      finish(false, err.message);
+    }
+  });
 }
 
 function openExternal(url) {

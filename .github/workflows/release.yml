@@ -1,8 +1,10 @@
-# Builds the Mac and Windows installers and attaches them to a GitHub Release.
-# Trigger: push a tag like v1.0.1  (git tag v1.0.1 && git push origin v1.0.1)
+# Builds the Mac and Windows installers, installs each one on a fresh GitHub machine and
+# launches it to prove it works. On a version tag (git tag v1.2.0 && git push origin v1.2.0)
+# the tested installers are then attached to a GitHub Release.
 name: Release
 on:
   push:
+    branches: [main]
     tags: ['v*']
   workflow_dispatch:
 
@@ -12,6 +14,7 @@ permissions:
 jobs:
   build:
     strategy:
+      fail-fast: false
       matrix:
         include:
           - os: macos-latest
@@ -29,6 +32,42 @@ jobs:
       - run: npm ci
       - run: npm test
       - run: npm run ${{ matrix.cmd }} -- --publish never
+
+      - name: Install from the .dmg and launch it, as a new user would
+        if: runner.os == 'macOS'
+        run: |
+          hdiutil attach -nobrowse -mountpoint /tmp/aw dist/*.dmg
+          mkdir -p "$HOME/Applications"
+          ditto "/tmp/aw/Application Workspace.app" "$HOME/Applications/Application Workspace.app"
+          hdiutil detach /tmp/aw
+          APP="$HOME/Applications/Application Workspace.app/Contents/MacOS/Application Workspace"
+          codesign --verify --deep --strict "$HOME/Applications/Application Workspace.app"
+          AW_SMOKE_TEST="$PWD/smoke.txt" "$APP" || true
+          cat smoke.txt && grep -q '^ok' smoke.txt
+          # Also run the Intel half of the universal app when Rosetta is available.
+          if arch -x86_64 /usr/bin/true 2>/dev/null; then
+            AW_SMOKE_TEST="$PWD/smoke-x64.txt" arch -x86_64 "$APP" || true
+            cat smoke-x64.txt && grep -q '^ok' smoke-x64.txt
+          else
+            echo "Rosetta not available on this runner; Intel half not launched."
+          fi
+
+      - name: Install with the .exe and launch it, as a new user would
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $setup = Get-ChildItem dist\*.exe | Select-Object -First 1
+          Start-Process $setup.FullName -ArgumentList '/S' -Wait
+          $exe = "$env:LOCALAPPDATA\Programs\Application Workspace\Application Workspace.exe"
+          if (-not (Test-Path $exe)) {
+            Get-ChildItem "$env:LOCALAPPDATA\Programs" -Recurse -Filter *.exe | Select-Object -First 10 FullName
+            throw "The installer did not put the app where expected"
+          }
+          $env:AW_SMOKE_TEST = "$PWD\smoke.txt"
+          Start-Process $exe -Wait
+          Get-Content smoke.txt
+          if (-not (Select-String -Path smoke.txt -Pattern '^ok' -Quiet)) { exit 1 }
+
       - uses: softprops/action-gh-release@v2
         if: startsWith(github.ref, 'refs/tags/')
         with:

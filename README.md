@@ -13,28 +13,40 @@ research notes for the interview.
 - **Fast to get around.** Press <kbd>⌘K</kbd> (Mac) or <kbd>Ctrl K</kbd> (Windows) and type
   a company, file name or action to jump straight to it.
 
+**[⬇ Download the latest version](https://github.com/cliffnhy03/application-workspace/releases/latest)** · Mac and Windows
+
 ---
 
 ## For students: install it
 
-Download the installer from the **Releases** page (link from whoever shared this with you).
+### Mac: one line, no warnings
+1. Open **Terminal** (press <kbd>⌘ Space</kbd>, type *Terminal*, press Return).
+2. Paste this line and press Return:
+   ```bash
+   curl -fsSL https://raw.githubusercontent.com/cliffnhy03/application-workspace/main/install.sh | bash
+   ```
+It downloads the latest version, puts it in Applications and opens it. Run the same line
+again any time to update; your data is kept. ([See what the script does](install.sh).)
 
-### Mac (`Application-Workspace-x.y.z.dmg`)
-1. Open the `.dmg` and drag **Application Workspace** into **Applications**.
-2. Open it from Applications. Because the app isn't registered with Apple (that costs $99 a
-   year), macOS blocks the first launch:
-   - Click **Done** on the warning.
-   - Open **System Settings › Privacy & Security**, scroll down and click **Open Anyway**
-     next to "Application Workspace was blocked".
-   - Confirm with your password. You only need to do this once.
-3. If macOS says the app **"is damaged"**, open Terminal and run the command below, then open the app again:
+<details>
+<summary>Prefer to download the .dmg yourself?</summary>
+
+1. Download `Application-Workspace-x.y.z.dmg` from the
+   [latest release](https://github.com/cliffnhy03/application-workspace/releases/latest).
+2. Open it and drag **Application Workspace** into **Applications**.
+3. Because the app isn't registered with Apple (that costs $99 a year), macOS blocks the
+   first launch. Open **System Settings › Privacy & Security**, scroll down and click
+   **Open Anyway**. If it says the app **"is damaged"** instead, run this in Terminal:
    ```bash
    xattr -cr "/Applications/Application Workspace.app"
    ```
+</details>
 
-### Windows (`Application-Workspace-Setup-x.y.z.exe`)
-1. Run the installer. If **Windows protected your PC** appears, click **More info › Run anyway**
-   (the app isn't code-signed).
+### Windows
+1. Download `Application-Workspace-Setup-x.y.z.exe` from the
+   [latest release](https://github.com/cliffnhy03/application-workspace/releases/latest) and run it.
+   If **Windows protected your PC** appears, click **More info › Run anyway** (the app isn't
+   code-signed).
 2. Pick an install folder and finish. It appears in the Start menu.
 
 ### Getting started

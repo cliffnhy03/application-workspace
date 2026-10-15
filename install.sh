@@ -29,6 +29,10 @@ say "Downloading $(basename "$URL")…"
 curl -fL --progress-bar -o "$TMP/app.dmg" "$URL"
 
 say "Installing into $DEST…"
+# A copy left mounted from an earlier browser download would still be blocked by macOS; eject it.
+for vol in /Volumes/Application\ Workspace*; do
+  [ -d "$vol" ] && hdiutil detach -quiet "$vol" 2>/dev/null || true
+done
 hdiutil attach -nobrowse -quiet -mountpoint "$MNT" "$TMP/app.dmg"
 if [ ! -w "$DEST" ]; then
   DEST="$HOME/Applications"
@@ -44,5 +48,33 @@ rm -rf "$DEST/$APP"
 ditto "$MNT/$APP" "$DEST/$APP"
 xattr -dr com.apple.quarantine "$DEST/$APP" 2>/dev/null || true
 
+# Copies from an earlier browser download carry the flag that makes macOS refuse to open them.
+for other in "/Applications/$APP" "$HOME/Applications/$APP" "$HOME/Downloads/$APP"; do
+  [ -d "$other" ] && [ "$other" != "$DEST/$APP" ] || continue
+  xattr -r "$other" 2>/dev/null | grep -q com.apple.quarantine || continue
+  if xattr -dr com.apple.quarantine "$other" 2>/dev/null; then
+    say "Also fixed an older copy at $other."
+  else
+    printf '\033[1;33mNote:\033[0m an older copy at %s may still be blocked. Drag it to the Bin and use the one in %s.\n' "$other" "$DEST"
+  fi
+done
+
 say "Done! Application Workspace is in $DEST."
-[ -n "${AW_NO_OPEN:-}" ] || open "$DEST/$APP"
+[ -z "${AW_NO_OPEN:-}" ] || exit 0
+
+open "$DEST/$APP"
+for _ in $(seq 1 20); do
+  pgrep -f "$DEST/$APP/Contents/MacOS/" >/dev/null && { say "It's open. Enjoy!"; exit 0; }
+  sleep 0.5
+done
+
+# macOS still refused (stricter versions or school-managed Macs). Point straight at the fix.
+cat <<'MSG'
+
+macOS blocked the app because it isn't registered with Apple. To allow it (one time only):
+  1. Click "Done" on the warning, if one is showing.
+  2. In the Privacy & Security window that's opening now, scroll down to
+     "Application Workspace was blocked" and click "Open Anyway".
+  3. Enter your Mac password, then click "Open Anyway" once more.
+MSG
+open "x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension" 2>/dev/null || true

@@ -19,7 +19,7 @@ research notes for the interview.
 
 ## For students: install it
 
-### Mac: one line, no warnings
+### Mac: Paste the line in the terminal to download it
 1. Open **Terminal** (press <kbd>⌘ Space</kbd>, type *Terminal*, press Return).
 2. Paste this line and press Return:
    ```bash

@@ -34,13 +34,21 @@ again any time to update; your data is kept. ([See what the script does](install
 1. Download `Application-Workspace-x.y.z.dmg` from the
    [latest release](https://github.com/cliffnhy03/application-workspace/releases/latest).
 2. Open it and drag **Application Workspace** into **Applications**.
-3. Because the app isn't registered with Apple (that costs $99 a year), macOS blocks the
-   first launch. Open **System Settings › Privacy & Security**, scroll down and click
-   **Open Anyway**. If it says the app **"is damaged"** instead, run this in Terminal:
-   ```bash
-   xattr -cr "/Applications/Application Workspace.app"
-   ```
+3. Open it from Applications. If macOS blocks it, see **If the app won't open** below.
 </details>
+
+### If the app won't open on a Mac
+The app isn't registered with Apple (that costs $99 a year), so macOS may block the first launch.
+It's a one-time fix:
+
+- **"Apple could not verify… is free of malware"**: click **Done**, open
+  **System Settings › Privacy & Security**, scroll down to "Application Workspace was blocked",
+  click **Open Anyway** and enter your Mac password.
+- **"Application Workspace is damaged and can't be opened"**: open **Terminal**, paste this line,
+  press Return, then open the app again:
+  ```bash
+  xattr -cr "/Applications/Application Workspace.app"
+  ```
 
 ### Windows
 1. Download `Application-Workspace-Setup-x.y.z.exe` from the

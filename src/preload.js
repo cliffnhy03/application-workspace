@@ -22,6 +22,12 @@ contextBridge.exposeInMainWorld('api', {
   restore: () => call('data:restore'),
   loadSample: () => call('sample:load'),
   clearSample: () => call('sample:clear'),
+  importPick: kind => call('import:pick', kind),
+  importPreview: opts => call('import:tracker:preview', opts),
+  importCommit: opts => call('import:tracker:commit', opts),
+  importUndo: () => call('import:undo'),
+  importDocsScan: paths => call('import:docs:scan', paths),
+  importDocsCommit: list => call('import:docs:commit', list),
   // Dropped files carry no path in the page itself; Electron resolves it here.
   pathForFile: file => webUtils.getPathForFile(file),
   onCommand: fn => ipcRenderer.on('command', (_e, cmd) => fn(cmd)),

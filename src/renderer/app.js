@@ -219,6 +219,7 @@ function renderSide() {
     ['dashboard', 'Dashboard', 'dashboard', '1', soon ? h('span', { class: 'badge', title: `${soon} deadline${soon > 1 ? 's' : ''} within a week` }, soon) : null],
     ['applications', 'Applications', 'briefcase', '2', active ? h('span', { class: 'count' }, active) : null],
     ['documents', 'Documents', 'file', '3', null],
+    ['import', 'Import', 'download', '4', null],
   ];
   const navBtn = ([view, label, ic, key, extra]) => h('button', {
     class: 'nav', type: 'button', 'aria-current': ui.view === view ? 'page' : null, onclick: () => go(view),
@@ -257,6 +258,7 @@ function welcome(compact) {
     h('div', { class: 'actions' },
       h('button', { class: 'btn', type: 'button', onclick: openNew }, icon('plus'), 'Add your first application'),
       h('button', { class: 'btn ghost', type: 'button', onclick: () => addFiles(null, 'cv') }, icon('upload'), 'Add master CV'),
+      h('button', { class: 'btn ghost', type: 'button', onclick: () => go('import') }, icon('download'), 'Import my Excel tracker'),
       h('button', { class: 'btn ghost', type: 'button', onclick: () => run(api.loadSample()) }, 'Explore with sample data')));
 }
 
@@ -588,6 +590,163 @@ function viewSettings(v) {
       h('dl', { class: 'keys' }, keys.flatMap(([k, d]) => [h('dt', null, h('kbd', null, k)), h('dd', null, d)])))));
 }
 
+/* ---------- Import ---------- */
+// ui.imp is null (start screen), a tracker under review, or a set of documents under review.
+const ACTION_LABEL = { new: 'New', update: 'Update', notes: 'Notes', same: 'No change', duplicate: 'Duplicate row' };
+const TRACKER_EXT = /\.(xlsx|xlsm|csv|tsv)$/i;
+
+async function startTracker(file) {
+  const r = await run(api.importPreview({ file }), { quiet: true });
+  if (!r.ok) return;
+  ui.imp = { mode: 'tracker', file, data: r.result, overrides: {} };
+  ui.impDone = null;
+  render();
+}
+async function refreshTracker() {
+  const im = ui.imp;
+  const r = await run(api.importPreview({ file: im.file, mapping: im.data.mapping, colors: im.data.colors, overrides: im.overrides }), { quiet: true });
+  if (r.ok) { im.data = r.result; render(); }
+}
+async function startDocs(paths) {
+  if (!S.applications.length) { toast('Add or import your applications first, so documents have somewhere to go.', true); return; }
+  const r = await run(api.importDocsScan(paths), { quiet: true });
+  if (!r.ok) return;
+  if (!r.result.length) { toast('No CVs or cover letters found there (PDF, Word, Pages or text files).', true); return; }
+  ui.imp = { mode: 'docs', items: r.result };
+  ui.impDone = null;
+  render();
+}
+function droppedOnImport(paths) {
+  const tracker = paths.length === 1 && TRACKER_EXT.test(paths[0]);
+  return tracker ? startTracker(paths[0]) : startDocs(paths);
+}
+
+function viewImport(v) {
+  const im = ui.imp;
+  v.append(h('header', { class: 'view-head' },
+    h('div', null, h('h1', null, 'Import'),
+      h('p', { class: 'sub' }, im ? 'Check what was found. Nothing is saved until you press Import.' : 'Bring in the tracker and documents you already have.')),
+    im ? h('div', { class: 'tools' }, h('button', { class: 'btn ghost', type: 'button', onclick: () => { ui.imp = null; render(); } }, 'Cancel')) : null));
+  if (im?.mode === 'tracker') return trackerReview(v, im);
+  if (im?.mode === 'docs') return docsReview(v, im);
+
+  if (ui.impDone) v.append(h('div', { class: 'done-bar' }, ui.impDone));
+  const card = (title, text, hint, button, onPick, onDrop) => {
+    const el = h('section', { class: 'panel import-card' },
+      h('h2', null, title), h('p', { class: 'sub' }, text),
+      h('div', { class: 'droparea' }, hint),
+      h('div', null, h('button', { class: 'btn', type: 'button', onclick: onPick }, icon('upload'), button)));
+    dropTarget(el, onDrop);
+    return el;
+  };
+  v.append(h('div', { class: 'grid2' },
+    card('1. Your tracker', 'An Excel or CSV list of your applications. Columns, stage dates and colour-coding (such as red for rejected) are read for you.',
+      'Drop your .xlsx or .csv here',
+      'Choose tracker…', async () => { const r = await run(api.importPick('tracker'), { quiet: true }); if (r.ok && r.result[0]) startTracker(r.result[0]); },
+      droppedOnImport),
+    card('2. Your CVs and cover letters', 'Files, or the whole folder they live in. Each one is matched to its company by its file and folder name.',
+      'Drop files or a folder here',
+      'Choose files or folder…', async () => { const r = await run(api.importPick('docs'), { quiet: true }); if (r.ok && r.result.length) startDocs(r.result); },
+      droppedOnImport)));
+  v.append(h('p', { class: 'sub import-tip' },
+    'Using Google Sheets or Google Docs? Download first: in Sheets, File › Download › Microsoft Excel; in Drive, right-click the folder › Download. Then drop the result here. Importing again later only adds what’s new and never undoes changes you made in the app.'));
+}
+
+function trackerReview(v, im) {
+  const d = im.data;
+  const included = d.items.filter(it => !it.skip && it.action !== 'duplicate');
+  const count = a => included.filter(it => it.action === a).length;
+  const changing = included.filter(it => it.action !== 'same').length;
+
+  v.append(h('section', { class: 'panel' },
+    h('div', { class: 'panel-head' }, h('div', null, h('h2', null, '1. Columns'),
+      h('p', { class: 'sub small' }, `From “${d.file}”${d.sheet && d.sheet !== d.file ? `, sheet “${d.sheet}”` : ''}. Change any that were guessed wrong; highlighted ones weren’t recognised.`))),
+    h('div', { class: 'map-grid' }, d.headers.map(col => h('label', { class: 'field map' + (col.unsure ? ' unsure' : '') },
+      h('span', null, col.name || '(no heading)'),
+      h('select', { class: 'input', id: `map-${col.index}`, value: col.field, onchange: e => { d.mapping[col.index] = e.target.value; refreshTracker(); } },
+        d.fields.map(([k, label]) => h('option', { value: k }, label))),
+      h('small', null, col.sample ? `e.g. ${col.sample.slice(0, 40)}` : 'empty'))))));
+
+  if (d.colors.length) {
+    v.append(h('section', { class: 'panel' },
+      h('div', { class: 'panel-head' }, h('div', null, h('h2', null, '2. Colours'),
+        h('p', { class: 'sub small' }, 'Rows in your sheet are colour-coded. Say what each colour means to you.'))),
+      d.colors.map(c => h('div', { class: 'colour-row' },
+        h('span', { class: 'swatch', style: `background:#${c.hex}` }),
+        h('b', null, c.name), h('span', { class: 'count' }, `${c.count} row${c.count === 1 ? '' : 's'}`),
+        h('select', { class: 'input', id: `col-${c.hex}`, 'aria-label': `Meaning of ${c.name}`, value: c.meaning, onchange: e => { c.meaning = e.target.value; refreshTracker(); } },
+          h('option', { value: 'none' }, 'No meaning'), h('option', { value: 'rejected' }, 'Rejected'), h('option', { value: 'offer' }, 'Offer'), h('option', { value: 'note' }, 'Something else: add a note')),
+        c.meaning === 'note' ? h('input', { class: 'input', id: `lab-${c.hex}`, placeholder: 'e.g. Pending decision', value: c.label, 'aria-label': `Note for ${c.name} rows`,
+          onchange: e => { c.label = e.target.value; refreshTracker(); } }) : null))));
+  }
+
+  const summary = [[count('new'), 'new'], [count('update'), 'moving stage'], [count('notes'), 'notes only'], [count('same'), 'unchanged']]
+    .filter(([n]) => n).map(([n, l]) => `${n} ${l}`).join(' · ');
+  const commit = async () => {
+    const r = await run(api.importCommit({ file: im.file, mapping: d.mapping, colors: d.colors, overrides: im.overrides }), { quiet: true });
+    if (!r.ok) return;
+    const { added, updated } = r.result;
+    ui.imp = null;
+    ui.impDone = `Imported from ${d.file}: ${added} added, ${updated} updated. Next, drop in your CVs and cover letters.`;
+    render();
+    toast(`${added} added, ${updated} updated.`, false, { label: 'Undo', run: async () => { const u = await run(api.importUndo()); if (u.ok) { ui.impDone = null; render(); toast('Import undone.'); } } });
+  };
+  v.append(h('section', { class: 'panel' },
+    h('div', { class: 'panel-head' }, h('div', null, h('h2', null, `${d.colors.length ? 3 : 2}. Check the result`), h('p', { class: 'sub small' }, summary || 'Nothing to import.')),
+      h('button', { class: 'btn', type: 'button', disabled: !changing, onclick: commit }, `Import ${changing} application${changing === 1 ? '' : 's'}`)),
+    h('table', { class: 'review' },
+      h('thead', null, h('tr', null, h('th', null, ''), h('th', null, 'Company'), h('th', null, 'Stage'), h('th', null, 'Dates found'), h('th', null, 'What happens'))),
+      h('tbody', null, d.items.map(it => {
+        const off = it.skip || it.action === 'duplicate';
+        const set = patch => { im.overrides[it.n] = { ...im.overrides[it.n], ...patch }; refreshTracker(); };
+        return h('tr', { class: off ? 'off' : '' },
+          h('td', null, h('input', { type: 'checkbox', id: `inc-${it.n}`, checked: !it.skip, disabled: it.action === 'duplicate', 'aria-label': `Include ${it.company}`, onchange: e => set({ skip: !e.target.checked }) })),
+          h('td', null, h('b', null, it.colour ? h('span', { class: 'swatch sm', style: `background:#${it.colour}` }) : null, it.company), h('div', { class: 'role' }, it.role)),
+          h('td', null, h('select', { class: 'kindsel', id: `stg-${it.n}`, value: String(it.stage), 'aria-label': `Stage for ${it.company}`, onchange: e => set({ stage: Number(e.target.value) }) },
+            d.stages.map((s, i) => h('option', { value: String(i) }, s)))),
+          h('td', { class: 'due' }, it.notes.timeline || '—'),
+          h('td', null, h('span', { class: `tag ${it.action}` }, ACTION_LABEL[it.action]),
+            [...it.changes, ...it.flags].map(t => h('div', { class: 'why' }, t))));
+      })))));
+}
+
+function docsReview(v, im) {
+  const apps = [...S.applications].sort((a, b) => a.company.localeCompare(b.company));
+  const label = a => `${a.company}${a.role ? ` · ${a.role.slice(0, 34)}` : ''}`;
+  const going = im.items.filter(f => f.dest !== 'skip');
+  const BADGE = { sure: ['Matched', 'new'], check: ['Check', 'update'], none: ['No match', 'same'], already: ['Already stored', 'same'] };
+  const commit = async () => {
+    const r = await run(api.importDocsCommit(going.map(f => ({ path: f.path, kind: f.kind, dest: f.dest }))), { quiet: true });
+    if (!r.ok) return;
+    ui.imp = null;
+    ui.impDone = `${r.result} document${r.result === 1 ? '' : 's'} stored with your applications.`;
+    go('documents');
+    toast(ui.impDone);
+  };
+  const order = { check: 0, sure: 1, none: 2, already: 3 };
+  const rows = im.items.map((f, i) => [f, i]).sort((x, y) => order[x[0].confidence] - order[y[0].confidence] || x[1] - y[1]);
+  v.append(h('section', { class: 'panel' },
+    h('div', { class: 'panel-head' }, h('div', null, h('h2', null, 'Where each document goes'),
+      h('p', { class: 'sub small' }, `${im.items.length} found · ${going.length} will be stored. Ones marked “Check” are listed first. The app keeps its own copy; your originals aren’t moved.`)),
+      h('button', { class: 'btn', type: 'button', disabled: !going.length, onclick: commit }, `Import ${going.length} document${going.length === 1 ? '' : 's'}`)),
+    h('table', { class: 'review' },
+      h('thead', null, h('tr', null, h('th', null, 'File'), h('th', null, 'Type'), h('th', null, 'Goes to'), h('th', null, ''))),
+      h('tbody', null, rows.map(([f, i]) => {
+        const suggested = f.candidates.map(id => appById(id)).filter(Boolean);
+        const others = apps.filter(a => !f.candidates.includes(a.id));
+        return h('tr', { class: f.dest === 'skip' ? 'off' : '' },
+          h('td', null, h('span', { class: 'fname-static' }, f.name), h('div', { class: 'role' }, f.folder)),
+          h('td', null, h('select', { class: 'kindsel', id: `dk-${i}`, value: f.kind, 'aria-label': `Type of ${f.name}`, onchange: e => { f.kind = e.target.value; } },
+            Object.entries(KIND_LABEL).map(([k, l]) => h('option', { value: k }, l)))),
+          h('td', null, h('select', { class: 'kindsel wide', id: `dd-${i}`, value: f.dest, 'aria-label': `Destination for ${f.name}`, onchange: e => { f.dest = e.target.value; render(); } },
+            h('option', { value: 'skip' }, 'Don’t import'),
+            h('option', { value: 'library' }, 'Master documents (not tied to a company)'),
+            suggested.length ? h('optgroup', { label: 'Suggested' }, suggested.map(a => h('option', { value: a.id }, label(a)))) : null,
+            h('optgroup', { label: 'All applications' }, others.map(a => h('option', { value: a.id }, label(a)))))),
+          h('td', null, h('span', { class: `tag ${BADGE[f.confidence][1]}` }, BADGE[f.confidence][0]), f.why ? h('div', { class: 'why' }, f.why) : null));
+      })))));
+}
+
 function applyTheme(t) {
   if (t === 'system') delete document.documentElement.dataset.theme;
   else document.documentElement.dataset.theme = t;
@@ -599,7 +758,7 @@ async function backup() {
   if (r.ok && r.result) toast('Backup saved.');
 }
 
-const VIEWS = { dashboard: viewDashboard, applications: viewApplications, documents: viewDocuments, settings: viewSettings };
+const VIEWS = { dashboard: viewDashboard, applications: viewApplications, documents: viewDocuments, import: viewImport, settings: viewSettings };
 
 /* ---------- New application ---------- */
 function openNew() {
@@ -636,6 +795,7 @@ function paletteItems(q) {
     { grp: 'Go to', t: 'Dashboard', icon: 'dashboard', run: () => go('dashboard') },
     { grp: 'Go to', t: 'Applications', icon: 'briefcase', run: () => go('applications') },
     { grp: 'Go to', t: 'Documents', icon: 'file', run: () => go('documents') },
+    { grp: 'Action', t: 'Import Excel tracker or CV folder', icon: 'download', run: () => go('import') },
     { grp: 'Action', t: 'Add master document', icon: 'upload', run: () => addFiles(null, 'cv') },
     { grp: 'Action', t: 'Back up workspace', icon: 'archive', run: backup },
     { grp: 'Go to', t: 'Settings & backup', icon: 'settings', run: () => go('settings') },

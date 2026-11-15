@@ -3,6 +3,7 @@ const path = require('node:path');
 const fs = require('node:fs');
 const os = require('node:os');
 const { Store } = require('./store');
+const importer = require('./importer');
 
 // Release check, run by CI on fresh machines: AW_SMOKE_TEST=<result file> starts the app on
 // throwaway data, exercises it, writes "ok …" or "fail …" to that file and quits.
@@ -90,6 +91,7 @@ function buildMenu() {
     { label: 'File', submenu: [
       { label: 'New Application…', accelerator: 'CmdOrCtrl+N', click: () => send('new') },
       { label: 'Add Master Document…', click: () => send('library-add') },
+      { label: 'Import Tracker or Documents…', click: () => send('view:import') },
       { type: 'separator' },
       { label: 'Back Up Workspace…', click: () => send('backup') },
       { label: 'Show Data Folder', click: () => shell.openPath(store.root) },
@@ -103,6 +105,7 @@ function buildMenu() {
       { label: 'Dashboard', accelerator: 'CmdOrCtrl+1', click: () => send('view:dashboard') },
       { label: 'Applications', accelerator: 'CmdOrCtrl+2', click: () => send('view:applications') },
       { label: 'Documents', accelerator: 'CmdOrCtrl+3', click: () => send('view:documents') },
+      { label: 'Import', accelerator: 'CmdOrCtrl+4', click: () => send('view:import') },
       { label: 'Settings & Backup', accelerator: 'CmdOrCtrl+,', click: () => send('view:settings') },
     ] },
     { label: 'View', submenu: [
@@ -192,6 +195,40 @@ function registerHandlers() {
   });
   handle('sample:load', () => store.loadSample());
   handle('sample:clear', () => store.clearSample());
+
+  // Import: the tracker is re-read only when the file changes; every choice on the review
+  // screen re-runs the interpretation, and nothing is saved until import:tracker:commit.
+  let cached = null;
+  const tableFor = async file => {
+    const stamp = `${file}:${fs.statSync(file).mtimeMs}`;
+    if (!cached || cached.stamp !== stamp) cached = { stamp, table: await importer.readTable(file) };
+    return cached.table;
+  };
+  handle('import:pick', async kind => {
+    const r = await dialog.showOpenDialog(win, kind === 'tracker'
+      ? { title: 'Choose your tracker', properties: ['openFile'], filters: [{ name: 'Excel or CSV', extensions: ['xlsx', 'xlsm', 'csv', 'tsv'] }] }
+      : { title: 'Choose CVs and cover letters, or the folder they are in', buttonLabel: 'Choose', properties: ['openFile', 'openDirectory', 'multiSelections'] });
+    return r.canceled ? [] : r.filePaths;
+  });
+  handle('import:tracker:preview', async ({ file, mapping, colors, overrides }) => {
+    const out = importer.interpret(await tableFor(file), { mapping, colors, overrides });
+    const plan = store.planImport(out.items);
+    return { ...out, items: out.items.map((it, i) => ({ ...it, action: plan[i].action, changes: plan[i].changes })) };
+  });
+  handle('import:tracker:commit', async ({ file, mapping, colors, overrides }) => {
+    const out = importer.interpret(await tableFor(file), { mapping, colors, overrides });
+    return store.syncApplications(out.items);
+  });
+  handle('import:undo', () => store.undoImport());
+  handle('import:docs:scan', paths => {
+    const snap = store.snapshot();
+    return importer.matchDocuments(paths, snap.applications, snap.files);
+  });
+  handle('import:docs:commit', list => {
+    let added = 0;
+    for (const f of list) { store.addFile({ appId: f.dest === 'library' ? null : f.dest, kind: f.kind, sourcePath: f.path }); added++; }
+    return added;
+  });
 }
 
 app.whenReady().then(() => {

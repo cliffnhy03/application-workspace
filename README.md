@@ -67,6 +67,19 @@ It's a one-time fix:
    (Shortlisted → Applied → Online test → Video interview → Interview → Offer). Clicked the wrong
    one? Press **Undo** on the message that pops up, or **Back to …** to step back a stage.
 
+### Already have a tracker? Import it
+Open **Import** in the sidebar (<kbd>⌘4</kbd> / <kbd>Ctrl 4</kbd>).
+
+1. **Drop in your Excel or CSV tracker.** The app works out which column is which, reads the date of
+   each stage, and picks up colour-coding (red rows are suggested as rejected; you say what any other
+   colour means). You check everything on one screen, and nothing is saved until you press **Import**.
+2. **Drop in your CVs and cover letters**, or the whole folder they're in. Each file is matched to its
+   company by its file and folder name. Anything uncertain is marked **Check** for you to confirm.
+
+Importing again later only adds new applications and moves stages forward. It never undoes changes you
+made in the app, and there's an **Undo** straight after each import. Using Google Sheets or Docs?
+Download them first (Sheets: *File › Download › Microsoft Excel*; Drive: right-click the folder › *Download*).
+
 Want to look around first? **Explore with sample data** loads invented applications,
 and you can clear them in one click.
 
@@ -75,7 +88,7 @@ and you can clear them in one click.
 |---|---|---|
 | ⌘K | Ctrl K | Quick find: any company, file or action |
 | ⌘N | Ctrl N | New application |
-| ⌘1 / ⌘2 / ⌘3 | Ctrl 1 / 2 / 3 | Dashboard / Applications / Documents |
+| ⌘1 / ⌘2 / ⌘3 / ⌘4 | Ctrl 1 / 2 / 3 / 4 | Dashboard / Applications / Documents / Import |
 | ⌘, | Ctrl , | Settings & backup |
 | / | / | Search applications |
 | ↑ ↓ | ↑ ↓ | Move through the application list |
@@ -123,6 +136,7 @@ Updating is just installing the new version over the old one. Data is kept betwe
 | File | Role |
 |---|---|
 | `src/store.js` | Backend: tracker data in `workspace.json` (atomic writes), file storage, backup/restore. No Electron dependency, covered by `test/store.test.js`. |
+| `src/importer.js` | Reads Excel/CSV trackers (columns, stage dates, row colours) and matches documents to companies. Covered by `test/importer.test.js`. |
 | `src/main.js` | Electron main process: window, menus and shortcuts, file dialogs, opening files, IPC handlers. |
 | `src/preload.js` | The narrow, typed bridge exposed to the window as `window.api`. |
 | `src/renderer/` | Interface: `index.html`, `styles.css`, `app.js` (no framework, no build step). |

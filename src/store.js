@@ -20,6 +20,7 @@ function migrateV1(a) {
 }
 
 const now = () => new Date().toISOString();
+const companyKey = name => String(name || '').toLowerCase().replace(/[^a-z0-9]+/g, '');
 const newId = () => crypto.randomUUID().slice(0, 8);
 
 function safeName(name) {
@@ -131,6 +132,111 @@ class Store {
     return { added, skipped };
   }
 
+  // Works out what an imported tracker row would do: add a new application, move an existing one
+  // forward, add to its notes, or nothing. Imports never move a stage backwards or undo edits made here.
+  #plan(item, index) {
+    const key = `${item.company}|${item.role}`.trim().toLowerCase().replace(/\s+/g, ' ');
+    const n = item.notes || {};
+    const labelLine = n.label ? `Marked in my tracker: ${n.label}` : '';
+    let a = index.byKey.get(key), renamed = false;
+    if (!a) {
+      // Same company, role worded differently: when each side has exactly one, it's the same application.
+      const c = companyKey(item.company), mine = index.byCompany.get(c) || [];
+      if (mine.length === 1 && index.incoming.get(c) === 1 && !index.claimed.has(mine[0].id)) { a = mine[0]; renamed = true; }
+    }
+    if (a) index.claimed.add(a.id);
+    if (!a) {
+      const notes = [(n.extras || []).join(' · '), n.timeline && `Timeline: ${n.timeline}`, labelLine,
+        n.info?.length && `\nFrom my tracker:\n${n.info.map(p => `- ${p}`).join('\n')}`].filter(Boolean).join('\n');
+      return { key, action: 'new', notes };
+    }
+    let notes = a.notes;
+    const dates = s => (s.match(/\d{1,2} [A-Z][a-z]{2} \d{4}/g) || []).join('|');
+    const current = notes.match(/^Timeline: .*$/m);
+    if (n.timeline && (!current || dates(current[0]) !== dates(n.timeline))) {
+      notes = current ? notes.replace(current[0], `Timeline: ${n.timeline}`) : [notes, `Timeline: ${n.timeline}`].filter(Boolean).join('\n');
+    }
+    if (labelLine && !notes.includes(labelLine)) notes = [notes, labelLine].filter(Boolean).join('\n');
+    for (const p of n.info || []) {
+      if (notes.includes(p)) continue;
+      notes += `${notes.includes('From my tracker:') ? '' : `${notes ? '\n\n' : ''}From my tracker:`}\n- ${p}`;
+    }
+    const forward = item.stage > a.stage && a.stage < OFFER;
+    const changes = [];
+    if (renamed) changes.push(`Matched to “${a.role || a.company}” in the app`);
+    if (forward) changes.push(`${STAGES[a.stage]} → ${STAGES[item.stage]}`);
+    else if (item.stage < a.stage) changes.push(`Kept at ${STAGES[a.stage]} (the app is further along)`);
+    if (notes !== a.notes) changes.push('notes updated');
+    return { key, existing: a, action: forward ? 'update' : notes !== a.notes ? 'notes' : 'same', forward, notes, changes };
+  }
+
+  #index(items) {
+    const byKey = new Map(this.data.applications.map(a => [`${a.company}|${a.role}`.trim().toLowerCase().replace(/\s+/g, ' '), a]));
+    const byCompany = new Map(), incoming = new Map();
+    for (const a of this.data.applications) byCompany.set(companyKey(a.company), [...(byCompany.get(companyKey(a.company)) || []), a]);
+    for (const it of items) incoming.set(companyKey(it.company), (incoming.get(companyKey(it.company)) || 0) + 1);
+    return { byKey, byCompany, incoming, claimed: new Set() };
+  }
+
+  // Dry run for the import review screen.
+  planImport(items) {
+    const index = this.#index(items), seen = new Set();
+    return items.map(item => {
+      const p = this.#plan(item, index);
+      const duplicate = seen.has(p.key);
+      seen.add(p.key);
+      return { n: item.n, action: duplicate ? 'duplicate' : p.action, changes: p.changes || [] };
+    });
+  }
+
+  syncApplications(items) {
+    this.undoSnapshot = structuredClone(this.data.applications);
+    const index = this.#index(items), { byKey } = index;
+    const result = { added: 0, updated: 0, unchanged: 0 };
+    for (const item of items) {
+      if (item.skip || !String(item.company || '').trim()) continue;
+      const p = this.#plan(item, index);
+      const t = now();
+      if (p.action === 'new') {
+        const a = blankApplication({
+          company: item.company.trim(), role: String(item.role || '').trim(), stage: item.stage,
+          location: String(item.location || ''), url: String(item.url || ''), salary: String(item.salary || ''),
+          due: item.stage < OFFER && /^\d{4}-\d{2}-\d{2}$/.test(item.due || '') ? item.due : null,
+          next: String(item.next || ''), notes: p.notes, createdAt: item.createdAt || t, updatedAt: t,
+          history: item.history?.length ? item.history : [{ stage: item.stage, at: t }],
+        });
+        this.data.applications.push(a);
+        byKey.set(p.key, a);
+        result.added++;
+      } else if (p.action === 'same') {
+        result.unchanged++;
+      } else {
+        const a = p.existing;
+        if (p.forward) {
+          if (item.stage >= OFFER) a.reopen = { next: a.next, due: a.due };
+          a.stage = item.stage;
+          a.history = item.history?.length ? item.history : [...a.history, { stage: item.stage, at: t }];
+          a.next = item.next || a.next;
+          if (item.stage >= OFFER) a.due = null;
+        }
+        if (!a.due && a.stage < OFFER && /^\d{4}-\d{2}-\d{2}$/.test(item.due || '')) a.due = item.due;
+        a.notes = p.notes;
+        a.updatedAt = t;
+        result.updated++;
+      }
+    }
+    this.#save();
+    return result;
+  }
+
+  // Puts the applications back as they were before the last import in this session.
+  undoImport() {
+    if (!this.undoSnapshot) throw new Error('Nothing to undo');
+    this.data.applications = this.undoSnapshot;
+    this.undoSnapshot = null;
+    this.#save();
+  }
+
   updateApplication(id, patch) {
     const a = this.#app(id);
     for (const key of EDITABLE) {
@@ -195,6 +301,7 @@ class Store {
     fs.mkdirSync(path.join(this.filesDir, path.dirname(rel)), { recursive: true });
     fs.copyFileSync(sourcePath, path.join(this.filesDir, rel));
     this.data.files.push({ id, appId, kind, name, rel, size: stat.size, addedAt: now() });
+    this.undoSnapshot = null; // an import can no longer be undone cleanly once files hang off it
     if (appId) this.#app(appId).updatedAt = now();
     this.#save();
     return id;
